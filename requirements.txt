@@ -1,0 +1,8 @@
+# Dependencies (text-only agent)
+discord.py>=2.5.0
+pyyaml
+python-dotenv
+requests
+ddgs
+
+# Note: sqlite3 (FTS5) is in the Python standard library; no extra dependency.
