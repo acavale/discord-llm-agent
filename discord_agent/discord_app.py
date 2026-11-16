@@ -347,7 +347,7 @@ class DiscordAgent(discord.Client):
         # DMs: answered for the owner and members of the bot's server; anyone outside it is ignored. Tools in
         # a DM still only see the server's public channels. No guild archive either way.
         if is_dm:
-            if not self._dm_allowed(message):
+            if not await self._dm_allowed(message):
                 return
             image_descs = await self._caption_images(message.attachments) if message.attachments else []
             self.transcripts.add(cid, Entry(user=message.author.display_name,
@@ -836,12 +836,24 @@ class DiscordAgent(discord.Client):
         if self.cfg.get("archive", "enabled", default=True):
             await asyncio.to_thread(self.msgstore.log, self.guild_id, cid, "agent", "agent", clean, "text", True)
 
-    def _dm_allowed(self, message) -> bool:
+    async def _dm_allowed(self, message) -> bool:
         """DMs are answered for the owner and for members of the bot's server; anyone else is ignored."""
         if self.creator_id and str(message.author.id) == self.creator_id:
             return True
         guild = self._server()
-        return guild is not None and guild.get_member(message.author.id) is not None
+        if guild is None:
+            return False
+        if guild.get_member(message.author.id) is not None:
+            return True
+        # The member cache is not complete right after a restart, so a cache miss is not proof
+        # someone is outside the server. Ask Discord once; a successful fetch also fills the cache.
+        fetch = getattr(guild, "fetch_member", None)
+        if fetch is None:
+            return False
+        try:
+            return await fetch(message.author.id) is not None
+        except discord.HTTPException:
+            return False
 
     def _server(self):
         try:

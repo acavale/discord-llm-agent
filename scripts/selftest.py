@@ -652,20 +652,28 @@ async def main() -> int:
 
     _saved_owner = c.creator_id
     c.creator_id = "42"
-    assert c._dm_allowed(_DM(42)) is True
-    assert c._dm_allowed(_DM(7)) is False
+    assert await c._dm_allowed(_DM(42)) is True
+    assert await c._dm_allowed(_DM(7)) is False
     c.creator_id = ""
-    assert c._dm_allowed(_DM(42)) is False, "no owner and no resolvable server -> nobody"
+    assert await c._dm_allowed(_DM(42)) is False, "no owner and no resolvable server -> nobody"
 
     class _MemberGuild:
+        # Member 5 is in the cache; member 6 is a real member the cache has not filled yet
+        # (the state right after a restart); everyone else is outside the server.
         def get_member(self, i):
             return object() if i == 5 else None
+
+        async def fetch_member(self, i):
+            if i == 6:
+                return object()
+            raise discord.NotFound(type("R", (), {"status": 404, "reason": "Not Found"})(), "unknown member")
 
     _saved_gid, _saved_get = c.guild_id, c.get_guild
     c.guild_id, c.get_guild = "123", (lambda _i: _MemberGuild())
     try:
-        assert c._dm_allowed(_DM(5)) is True, "server member may DM"
-        assert c._dm_allowed(_DM(9)) is False, "non-member may not"
+        assert await c._dm_allowed(_DM(5)) is True, "server member may DM"
+        assert await c._dm_allowed(_DM(6)) is True, "cache miss after restart must fall back to a fetch"
+        assert await c._dm_allowed(_DM(9)) is False, "non-member may not"
     finally:
         c.guild_id, c.get_guild = _saved_gid, _saved_get
     c.creator_id = _saved_owner
