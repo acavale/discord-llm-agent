@@ -780,6 +780,102 @@ async def main() -> int:
     assert not c.member_memory.knows("stranger")
     print("no_phantom_members OK")
 
+    # gate: empty, double-up, and low-effort messages never reach the model; a plain human message
+    # passes at baseline, questions and lulls raise the score, and the floor is honored.
+    from discord_agent.gate import Gate, RhythmBudget
+
+    class _TMsg:
+        def __init__(self, is_bot):
+            self.is_bot = is_bot
+
+    class _Transcripts:
+        def __init__(self, recent=(), vel=5):
+            self._recent = list(recent)
+            self._vel = vel
+
+        def recent(self, _cid, n):
+            return self._recent[:n]
+
+        def velocity(self, _cid):
+            return self._vel
+
+    gate = Gate()
+    assert gate.score("", _Transcripts(), "1") == (0.0, "empty")
+    assert gate.score("   ", _Transcripts(), "1") == (0.0, "empty")
+    assert gate.score("what is up tonight?", _Transcripts([_TMsg(True)]), "1") == (0.0, "would-double-up")
+    for _low in ("lol", "ok", "yeah", "hi"):
+        assert gate.score(_low, _Transcripts(), "1") == (0.0, "low-effort"), _low
+    _s, _r = gate.score("fortnite squad tonight at eight", _Transcripts([_TMsg(False)]), "1")
+    assert abs(_s - 0.55) < 1e-9 and _r == "baseline", (_s, _r)
+    _s, _r = gate.score("fortnite squad tonight at eight?", _Transcripts([_TMsg(False)]), "1")
+    assert abs(_s - 0.70) < 1e-9 and _r == "baseline,question", (_s, _r)
+    _s, _r = gate.score("what time is the game", _Transcripts([_TMsg(False)]), "1")
+    assert abs(_s - 0.70) < 1e-9 and "question" in _r, (_s, _r)
+    _s, _r = gate.score("fortnite squad tonight at eight", _Transcripts([_TMsg(False)], vel=1), "1")
+    assert abs(_s - 0.65) < 1e-9 and _r == "baseline,lull", (_s, _r)
+    assert gate.should_consider("fortnite squad tonight at eight", _Transcripts(), "1")[0] is True
+    assert gate.should_consider("fortnite squad tonight at eight", _Transcripts(), "1", floor=0.6)[0] is False
+    print("gate_scoring OK")
+
+    # rhythm budget: tokens deplete per speak and refill by capacity, channels are independent,
+    # the post-speak cooldown blocks even with tokens left, and reset restores a channel.
+    budget = RhythmBudget(hourly_budget=2, post_speak_cooldown_s=0)
+    assert budget.can_speak("a") is True
+    budget.record_speak("a")
+    budget.record_speak("a")
+    assert budget.can_speak("a") is False
+    assert budget.can_speak("b") is True
+    budget.reset("a")
+    assert budget.can_speak("a") is True
+    cooling = RhythmBudget(hourly_budget=10, post_speak_cooldown_s=60)
+    cooling.record_speak("a")
+    assert cooling.can_speak("a") is False
+    assert cooling.can_speak("b") is True
+    print("rhythm_budget OK")
+
+    # messages: archive ingest is idempotent and skips bad lines; FTS search honors channel scope,
+    # blank queries and empty scopes return nothing, stats count distinct users, recent chatter
+    # excludes the bot's own rows, and a live log line is searchable.
+    from discord_agent.messages import Messages
+
+    _mdir = Path(tempfile.mkdtemp(prefix="agent-selftest-messages-"))
+    _jsonl = _mdir / "archive.jsonl"
+    _rows = [
+        {"id": "m1", "timestamp": 1700000000.0, "guild_id": "g", "channel_id": "10",
+         "user_id": "u1", "username": "jordan", "message": "we played fortnite all night",
+         "source": "text", "responded": False},
+        {"id": "m2", "timestamp": 1700000010.0, "guild_id": "g", "channel_id": "20",
+         "user_id": "u2", "username": "taylor", "message": "fortnite ranked grind tomorrow",
+         "source": "text", "responded": False},
+        {"id": "m3", "timestamp": 1700000020.0, "guild_id": "g", "channel_id": "10",
+         "user_id": "u3", "username": "agent", "message": "bot style sample to exclude",
+         "source": "text", "responded": True},
+    ]
+    _jsonl.write_text("\n".join(json.dumps(r) for r in _rows) + "\n{not json\n\n", encoding="utf-8")
+    msgs = Messages(_jsonl, _mdir / "index.db")
+    assert msgs.ingest_archive() == 3
+    assert msgs.ingest_archive() == 0
+    _hits = msgs.search("fortnite")
+    assert [h["username"] for h in _hits] == ["taylor", "jordan"], _hits
+    assert [h["username"] for h in msgs.search("fortnite", channel_ids={"10"})] == ["jordan"]
+    assert msgs.search("fortnite", channel_ids=set()) == []
+    assert msgs.search("   ") == []
+    assert msgs.search("termthatmatchesnothing") == []
+    assert [h["username"] for h in msgs.search('fortnite!!! "ranked"')] == ["taylor", "jordan"]
+    _stats = msgs.channel_stats("10")
+    assert _stats["n"] == 2 and _stats["users"] == 2, _stats
+    assert msgs.recent_chatter([]) == [("jordan", "we played fortnite all night"),
+                                       ("taylor", "fortnite ranked grind tomorrow")]
+    assert msgs.recent_chatter(["10", "20"]) == []
+    msgs.log("g", "10", "u9", "casey", "zebra crossing story")
+    assert [h["username"] for h in msgs.search("zebra")] == ["casey"]
+    assert Messages._parse_ts(1700000000) == 1700000000.0
+    assert Messages._parse_ts("2023-11-14T22:13:20") > 0
+    assert Messages._parse_ts("not a date") == 0.0 and Messages._parse_ts(None) == 0.0
+    assert Messages._fts_query("a b") == '"a" OR "b"' and Messages._fts_query("") == '""'
+    msgs.close()
+    print("messages_archive_search OK")
+
     print(f"config: debounce={c.debounce_secs_default if hasattr(c,'debounce_secs_default') else cfg.get('chime_in','debounce_seconds',default='?')}"
           f" name_drop_prob={c.name_drop_prob} ch1={cfg.get('channels',default={}).get('CHANNEL_ID_1',{}).get('chime_in')}")
     print("ALL SELFTESTS PASSED")
