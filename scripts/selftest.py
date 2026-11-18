@@ -876,6 +876,68 @@ async def main() -> int:
     msgs.close()
     print("messages_archive_search OK")
 
+    # kb tools: write/read/list/search roundtrip in the hermetic KB root, and every path is confined
+    # to that root (traversal is refused, never resolved outside it).
+    assert (await _kb.kb_write({"path": "research/zebras.md", "content": "Zebras sleep standing up."}, _ctx)).startswith("Saved zebras.md")
+    assert await _kb.kb_read({"path": "research/zebras.md"}, _ctx) == "Zebras sleep standing up."
+    assert await _kb.kb_read({"path": "research/missing.md"}, _ctx) == "(file not found)"
+    assert await _kb.kb_write({"path": "../escape.md", "content": "x"}, _ctx) == "(invalid path)"
+    assert not (st.kb_dir.parent / "escape.md").exists(), "traversal write escaped the KB root"
+    assert await _kb.kb_read({"path": "../config.yaml"}, _ctx) == "(file not found)"
+    assert "research/" in await _kb.kb_list({}, _ctx)
+    assert "zebras.md" in await _kb.kb_list({"subdir": "research"}, _ctx)
+    assert await _kb.kb_list({"subdir": "../"}, _ctx) == "(empty or invalid path)"
+    assert "research/zebras.md" in await _kb.kb_search({"query": "ZEBRAS"}, _ctx)
+    assert "research/zebras.md" in await _kb.kb_search({"query": "standing"}, _ctx)
+    assert await _kb.kb_search({"query": "  "}, _ctx) == "(empty query)"
+    assert (await _kb.kb_search({"query": "qqq-nothing"}, _ctx)).startswith("No KB files match")
+    print("kb_tools OK")
+
+    # polls: validation refuses bad input before anything posts, options are cleaned and capped,
+    # the duration clamps to 1-168h, and a send failure is reported, not raised.
+    from discord_agent.tools import polls as _polls
+
+    class _PollCh:
+        def __init__(self, fail=False):
+            self.sent = []
+            self._fail = fail
+
+        async def send(self, poll=None):
+            if self._fail:
+                raise RuntimeError("boom")
+            self.sent.append(poll)
+
+    assert await _polls.create_poll({"question": "q", "options": ["a", "b"]}, _ctx) == "(create_poll unavailable here)"
+    _pch = _PollCh()
+    _pctx = _TC(cfg, st, c.msgstore, c.member_memory, c.quirks, channel=_pch)
+    assert "at least 2 options" in await _polls.create_poll({"question": " ", "options": ["a", "b"]}, _pctx)
+    assert "at least 2 options" in await _polls.create_poll({"question": "q", "options": ["only", " "]}, _pctx)
+    assert _pch.sent == [], "invalid polls must not post"
+    assert await _polls.create_poll({"question": "Best night?", "options": [" fri ", "", "sat"],
+                                     "duration_hours": 999}, _pctx) == "Posted a poll: Best night?"
+    _poll = _pch.sent[0]
+    assert _poll.question == "Best night?" and [a.text for a in _poll.answers] == ["fri", "sat"]
+    assert _poll.duration == datetime.timedelta(hours=168), _poll.duration
+    await _polls.create_poll({"question": "q", "options": ["x" * 60, "y"]}, _pctx)
+    assert len(_pch.sent[1].answers[0].text) == 55, "option text truncates at 55 chars"
+    _fctx = _TC(cfg, st, c.msgstore, c.member_memory, c.quirks, channel=_PollCh(fail=True))
+    assert await _polls.create_poll({"question": "q", "options": ["a", "b"]}, _fctx) == "(poll failed)"
+    print("polls_validation OK")
+
+    # recall: results are scoped to @everyone-readable channels; with no resolvable guild the tool
+    # fails closed even when the archive has matches, and the limit caps the lines returned.
+    from discord_agent.tools import recall as _recall
+
+    _rctx_none = _TC(cfg, st, c.msgstore, c.member_memory, c.quirks, guild=None)
+    assert await _recall.recall({"query": "pizza"}, _rctx_none) == "Nothing in the archive matches 'pizza'."
+    _rctx = _TC(cfg, st, c.msgstore, c.member_memory, c.quirks, guild=_Guild())
+    _rout = await _recall.recall({"query": "pizza"}, _rctx)
+    assert _rout.startswith("Past messages matching 'pizza':"), _rout
+    assert "public pizza plans" in _rout and "private pizza plans" not in _rout, _rout
+    _rout1 = await _recall.recall({"query": "pizza", "limit": 1}, _rctx)
+    assert len(_rout1.splitlines()) == 2, _rout1
+    print("recall_tool OK")
+
     print(f"config: debounce={c.debounce_secs_default if hasattr(c,'debounce_secs_default') else cfg.get('chime_in','debounce_seconds',default='?')}"
           f" name_drop_prob={c.name_drop_prob} ch1={cfg.get('channels',default={}).get('CHANNEL_ID_1',{}).get('chime_in')}")
     print("ALL SELFTESTS PASSED")
