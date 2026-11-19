@@ -938,6 +938,108 @@ async def main() -> int:
     assert len(_rout1.splitlines()) == 2, _rout1
     print("recall_tool OK")
 
+    # vision: look_at_channel refuses missing, unknown, and non-public channels and fails soft on a
+    # history error; a public channel renders oldest-first with image tags, captions only the 2 most
+    # recent images, and clamps the scan limit; _caption returns None for non-images, oversized
+    # attachments, unreadable attachments, and when no vision model is configured.
+    from discord_agent.tools import vision as _vision
+
+    class _VPerm:
+        def __init__(self, ok):
+            self.read_messages = ok
+
+    class _VAtt:
+        def __init__(self, content_type="image/png", size=4, data=b"img!", fail=False):
+            self.content_type = content_type
+            self.size = size
+            self._data = data
+            self._fail = fail
+
+        async def read(self):
+            if self._fail:
+                raise RuntimeError("boom")
+            return self._data
+
+    class _VMsg:
+        def __init__(self, who, content="", atts=()):
+            self.author = type("A", (), {"display_name": who})()
+            self.content = content
+            self.attachments = list(atts)
+
+    class _VCh:
+        def __init__(self, i, name, public, msgs=(), fail=False):
+            self.id = i
+            self.name = name
+            self._public = public
+            self._msgs = list(msgs)
+            self._fail = fail
+            self.seen_limit = None
+
+        def permissions_for(self, _role):
+            return _VPerm(self._public)
+
+        async def history(self, limit=None):
+            self.seen_limit = limit
+            if self._fail:
+                raise discord.DiscordException("no access")
+            for m in self._msgs:
+                yield m
+
+    class _VGuild:
+        default_role = object()
+
+        def __init__(self, chans):
+            self.text_channels = list(chans)
+
+        def get_channel(self, i):
+            return next((ch for ch in self.text_channels if ch.id == i), None)
+
+    class _VLLM:
+        def __init__(self):
+            self.calls = []
+
+        def complete(self, messages, tools=None):
+            self.calls.append(messages)
+            return {"content": f"caption {len(self.calls)}"}
+
+    # history arrives newest-first, as Discord delivers it
+    _pics = _VCh(10, "pics", True, msgs=[
+        _VMsg("taylor", "third post", [_VAtt()]),
+        _VMsg("jordan", "", [_VAtt()]),
+        _VMsg("casey", "first post", [_VAtt(), _VAtt(content_type="text/plain")]),
+    ])
+    _vguild = _VGuild([_pics, _VCh(11, "staff", False), _VCh(12, "broken", True, fail=True),
+                       _VCh(13, "quiet", True)])
+    _vllm = _VLLM()
+    _vctx = _TC(cfg, st, c.msgstore, c.member_memory, c.quirks, guild=_vguild, vision_llm=_vllm)
+    assert await _vision.look_at_channel({"channel": "  "}, _vctx) == "(look_at_channel: no channel given)"
+    assert await _vision.look_at_channel({"channel": "nope"}, _vctx) == \
+        "(look_at_channel: couldn't find a channel matching 'nope')"
+    assert await _vision.look_at_channel({"channel": "staff"}, _vctx) == \
+        "(look_at_channel: that channel isn't public to the server, so it's off-limits)"
+    assert await _vision.look_at_channel({"channel": "broken"}, _vctx) == \
+        "(look_at_channel: can't read #broken)"
+    assert "(no recent text)" in await _vision.look_at_channel({"channel": "quiet"}, _vctx)
+    _vout = await _vision.look_at_channel({"channel": "#pics", "limit": 999}, _vctx)
+    assert _pics.seen_limit == 40, _pics.seen_limit
+    assert _vout.startswith("Recent activity in #pics:"), _vout
+    assert _vout.index("first post") < _vout.index("third post"), _vout
+    assert "[+image]" in _vout, _vout
+    assert len(_vllm.calls) == 2, _vllm.calls
+    assert "image from jordan: caption 1" in _vout and "image from taylor: caption 2" in _vout, _vout
+    assert "image from casey" not in _vout, _vout
+    _cap_llm = _VLLM()
+    _cap_ctx = _TC(cfg, st, c.msgstore, c.member_memory, c.quirks, vision_llm=_cap_llm)
+    assert await _vision._caption(_cap_ctx, _VAtt(content_type="text/plain")) is None
+    assert await _vision._caption(_cap_ctx, _VAtt(size=_vision._MAX_IMAGE_BYTES + 1)) is None
+    assert await _vision._caption(_cap_ctx, _VAtt(fail=True)) is None
+    assert await _vision._caption(_TC(cfg, st, c.msgstore, c.member_memory, c.quirks), _VAtt()) is None
+    assert _cap_llm.calls == [], "skipped attachments must never reach the vision model"
+    assert await _vision._caption(_cap_ctx, _VAtt()) == "caption 1"
+    _sent_url = _cap_llm.calls[0][0]["content"][1]["image_url"]["url"]
+    assert _sent_url.startswith("data:image/png;base64,"), _sent_url
+    print("vision_look_at_channel OK")
+
     print(f"config: debounce={c.debounce_secs_default if hasattr(c,'debounce_secs_default') else cfg.get('chime_in','debounce_seconds',default='?')}"
           f" name_drop_prob={c.name_drop_prob} ch1={cfg.get('channels',default={}).get('CHANNEL_ID_1',{}).get('chime_in')}")
     print("ALL SELFTESTS PASSED")
