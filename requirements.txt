@@ -1,8 +1,10 @@
 # Dependencies (text-only agent)
-discord.py>=2.5.0
-pyyaml
-python-dotenv
-requests
-ddgs
+# Pinned to the versions verified by scripts/selftest.py (2026-11-20).
+# Pin only direct dependencies; transitive pins would churn on every release.
+discord.py==2.7.1
+PyYAML==6.0.3
+python-dotenv==1.2.4
+requests==2.34.2
+ddgs==9.16.1
 
 # Note: sqlite3 (FTS5) is in the Python standard library; no extra dependency.
