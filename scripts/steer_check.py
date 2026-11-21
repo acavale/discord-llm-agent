@@ -16,10 +16,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from discord_agent.config import load_config
-from discord_agent.store import Store
-from discord_agent.memory import MemberMemory
 from discord_agent.context import build_system_prompt
 from discord_agent.llm import LLM
+from discord_agent.memory import MemberMemory
+from discord_agent.store import Store
 
 MEMBER = sys.argv[1] if len(sys.argv) > 1 else "alex"
 

@@ -15,8 +15,8 @@ import datetime
 import json
 import logging
 import random
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 

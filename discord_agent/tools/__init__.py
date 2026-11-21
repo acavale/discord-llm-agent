@@ -7,8 +7,8 @@ loop and the rest of the app never change.
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +96,7 @@ async def dispatch(name: str, args: dict, ctx: ToolContext) -> str:
         return f"(unknown tool: {name})"
     try:
         return await spec.handler(args or {}, ctx)
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         logger.exception("tool %s failed", name)
         return f"(tool {name} failed)"
 
@@ -108,4 +108,4 @@ def enabled_from_config(cfg) -> set[str]:
 
 
 # Import tool modules so they register. Keep at bottom to avoid circular imports.
-from . import web, recall, memory_tools, kb, polls, vision  # noqa: E402,F401
+from . import web, recall, memory_tools, kb, polls, vision  # noqa: E402,F401,I001

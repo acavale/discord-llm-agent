@@ -72,7 +72,7 @@ async def run(
     system_prompt: str,
     messages: list[dict],
     enabled_tools: set[str],
-    ctx: "toolreg.ToolContext",
+    ctx: toolreg.ToolContext,
     allow_silence: bool = False,
     max_rounds: int = 6,
     force_first_tool: str | None = None,

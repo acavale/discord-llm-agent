@@ -27,7 +27,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from discord_agent.config import load_config
 from discord_agent.context import build_system_prompt
-from discord_agent.discord_app import phrase_cooldown_block, question_directive_block, recent_phrase_bans
+from discord_agent.discord_app import (
+    phrase_cooldown_block,
+    question_directive_block,
+    recent_phrase_bans,
+)
 from discord_agent.llm import LLM
 from discord_agent.memory import MemberMemory, Quirks
 from discord_agent.messages import Messages

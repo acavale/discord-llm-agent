@@ -39,6 +39,6 @@ async def create_poll(args: dict, ctx: ToolContext) -> str:
         for opt in options:
             poll.add_answer(text=opt[:55])
         await ctx.channel.send(poll=poll)
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         return "(poll failed)"
     return f"Posted a poll: {question}"

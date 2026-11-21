@@ -31,11 +31,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from discord_agent import reflection
 from discord_agent.config import load_config
 from discord_agent.llm import LLM
 from discord_agent.memory import MemberMemory
 from discord_agent.store import Store
-from discord_agent import reflection
 
 BOT_NAMES = {"agent"}  # never profile the bot itself
 

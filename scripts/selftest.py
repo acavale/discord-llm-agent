@@ -23,11 +23,11 @@ sys.path.insert(0, str(_REPO))
 
 import discord
 
+from discord_agent import agent as agentmod
 from discord_agent.config import load_config
-from discord_agent.store import Store
 from discord_agent.discord_app import DiscordAgent
 from discord_agent.scheduler import Scheduler
-from discord_agent import agent as agentmod
+from discord_agent.store import Store
 
 
 def _hermetic_env() -> None:
@@ -356,11 +356,13 @@ async def main() -> int:
         st_a = {"r": 0, "d": 0}
 
         async def _run_a(*a, **k):
-            i = st_a["r"]; st_a["r"] += 1
+            i = st_a["r"]
+            st_a["r"] += 1
             return agentmod.AgentResult(text=seq_a[i] if i < len(seq_a) else None)
 
         async def _dec_a(*a, **k):
-            i = st_a["d"]; st_a["d"] += 1
+            i = st_a["d"]
+            st_a["d"] += 1
             return dec_a[i] if i < len(dec_a) else False
 
         agentmod.run, agentmod.decide_followup = _run_a, _dec_a
@@ -375,7 +377,8 @@ async def main() -> int:
         st_b = {"r": 0}
 
         async def _run_b(*a, **k):
-            i = st_b["r"]; st_b["r"] += 1
+            i = st_b["r"]
+            st_b["r"] += 1
             return agentmod.AgentResult(text=seq_b[i] if i < len(seq_b) else None)
 
         async def _always(*a, **k):
@@ -712,7 +715,8 @@ async def main() -> int:
 
     # write caps: oversized notes, member facts, and quirks are refused
     from discord_agent.tools import ToolContext as _TC
-    from discord_agent.tools import kb as _kb, memory_tools as _mt
+    from discord_agent.tools import kb as _kb
+    from discord_agent.tools import memory_tools as _mt
     _ctx = _TC(cfg, st, c.msgstore, c.member_memory, c.quirks)
     assert "too long" in await _kb.kb_write({"path": "t.md", "content": "x" * 30000}, _ctx)
     assert "under 300" in await _mt.remember_member({"name": "taylor", "note": "x" * 400}, _ctx)

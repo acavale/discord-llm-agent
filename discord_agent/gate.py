@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 _QUESTION_WORDS = re.compile(r"\b(who|what|when|where|why|how|which|anyone|should|is it|does)\b", re.I)
 _LOW_EFFORT = re.compile(r"^(lol|lmao|k|ok|yeah|yea|nah|same|fr|true|w|l|\+|\.)+$", re.I)
