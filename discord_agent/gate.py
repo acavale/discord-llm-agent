@@ -49,6 +49,12 @@ class RhythmBudget:
             return False
         return b.tokens >= 1.0
 
+    def has_budget(self, cid: str) -> bool:
+        """Token check only, without the post-speak cooldown. Directed replies (a mention, a name-drop,
+        an answer to the bot's riddle) often land seconds after the bot's own last post, and the
+        cooldown in can_speak would eat exactly those; the hourly bucket alone is the spam cap there."""
+        return self._bucket(cid).tokens >= 1.0
+
     def record_speak(self, cid: str) -> None:
         b = self._bucket(cid)
         b.tokens = max(0.0, b.tokens - 1.0)

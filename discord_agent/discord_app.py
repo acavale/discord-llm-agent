@@ -398,17 +398,25 @@ class DiscordAgent(discord.Client):
             return
 
         # Hard trigger: mention or reply. Answers immediately (in a allowlisted channel; cancel any pending
-        # debounced reply first so we don't double up).
+        # debounced reply first so we don't double up). The per-channel hourly budget is the only cap: a
+        # direct address is answered unless the bucket is spent.
         if mentioned or replied:
+            if not self.budget.has_budget(cid):
+                logger.info("ch%s direct address skipped: hourly budget spent", cid)
+                return
             self._cancel_pending(cid)
-            await self._respond_now(message.channel, cid, allow_silence=False)
+            await self._respond_now(message.channel, cid, allow_silence=False, consume_budget=True)
             return
 
-        # Name-drop (typed name, no @): in a allowlisted channel only (general/game already returned above), on a
-        # probability gate so it doesn't fire every single time. Debounced like the rest.
+        # Name-drop (typed name, no @): in a allowlisted channel only (general/game already returned above).
+        # Also a direct address, so it is answered every time -- no probability roll; the hourly budget is
+        # the only cap. Debounced like the rest. (Riddle answers land here too whenever they name the bot,
+        # and as plain messages in a chime-all channel just below; both paths now always fire.)
         if is_name_drop:
-            if random.random() < self.name_drop_prob:
-                self._schedule_response(message.channel, cid, allow_silence=False, consume_budget=False)
+            if not self.budget.has_budget(cid):
+                logger.info("ch%s name-drop skipped: hourly budget spent", cid)
+                return
+            self._schedule_response(message.channel, cid, allow_silence=False, consume_budget=True)
             return
 
         # Ambient autonomy: only in chime channels.

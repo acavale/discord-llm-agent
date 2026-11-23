@@ -835,6 +835,15 @@ async def main() -> int:
     cooling.record_speak("a")
     assert cooling.can_speak("a") is False
     assert cooling.can_speak("b") is True
+    # has_budget: the token check alone, no cooldown -- a directed reply right after the bot's own
+    # post still has budget, and only a spent bucket blocks it.
+    assert cooling.has_budget("a") is True
+    spent = RhythmBudget(hourly_budget=2, post_speak_cooldown_s=0)
+    assert spent.has_budget("a") is True
+    spent.record_speak("a")
+    spent.record_speak("a")
+    assert spent.has_budget("a") is False
+    assert spent.has_budget("b") is True
     print("rhythm_budget OK")
 
     # messages: archive ingest is idempotent and skips bad lines; FTS search honors channel scope,
