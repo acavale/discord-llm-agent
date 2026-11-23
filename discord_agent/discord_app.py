@@ -110,6 +110,15 @@ _FOLLOWUP_TURN_HINT = (
     "NOT repeat or rephrase what you just said. If someone replied in the meantime, react to that."
 )
 
+# Appended to every presence-greeting directive. The greeting RATE is set by the scheduler and is not
+# touched here; this only varies the wording, because the greetings had collapsed onto one simile
+# template reused on everyone.
+_GREETING_VARIETY = (
+    " Vary the SHAPE of the greeting itself: never open two greetings the same way, and never reuse a "
+    "simile, metaphor, or sentence skeleton you have used on anyone else. Pick a different form each "
+    "time -- a question, a callback to something they said or did, a short one-liner, a plain hello."
+)
+
 
 class DiscordAgent(discord.Client):
     def __init__(self, cfg, store, **kwargs) -> None:
@@ -308,13 +317,13 @@ class DiscordAgent(discord.Client):
             verb = {"playing": "playing", "listening": "listening to", "streaming": "streaming",
                     "watching": "watching", "competing": "competing in"}.get(atype, "on")
             return (f"WHAT JUST CHANGED: {user} is now {verb} {act}. THIS is the event that triggered you, so "
-                    f"open on it and talk about {user} and {act} specifically.")
+                    f"open on it and talk about {user} and {act} specifically." + _GREETING_VARIETY)
         extra = f" (status: {act})" if act else ""
         return (f"WHAT JUST CHANGED: {user} just came online{extra}. THIS is the trigger, so say something "
                 f"to {user} specifically -- riff on who they are, what they've been into lately, an inside "
                 f"joke, the day/time, or whatever's actually going on. React to THEM, not the room, and MIX "
                 f"IT UP: do NOT default to the 'you're online but not in a game, stop lurking, go boot "
-                f"something' bit -- you have run that into the ground on everyone.")
+                f"something' bit -- you have run that into the ground on everyone." + _GREETING_VARIETY)
 
     def _identity_groups(self) -> list[set[str]]:
         groups = []
