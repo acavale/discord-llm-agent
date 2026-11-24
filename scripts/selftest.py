@@ -846,6 +846,20 @@ async def main() -> int:
     assert spent.has_budget("b") is True
     print("rhythm_budget OK")
 
+    # greeting_skeleton: the same opening frame aimed at different people skeletonizes the same
+    # once the name tokens are dropped; a genuinely different opening does not.
+    from discord_agent.discord_app import greeting_skeleton
+
+    _frame_a = greeting_skeleton(
+        "alice just came online like he's been waiting for the world to notice", {"alice"})
+    _frame_b = greeting_skeleton(
+        "bob just came online like he's been waiting for a sign from the universe", {"bob"})
+    assert _frame_a == _frame_b == "just came online like he s been waiting", (_frame_a, _frame_b)
+    _other = greeting_skeleton("yo bob, heard you finally beat that boss last night", {"bob"})
+    assert _other != _frame_a and _other.startswith("yo heard you finally"), _other
+    assert greeting_skeleton("carol just came online", set()) == "carol just came online"
+    print("greeting_skeleton OK")
+
     # messages: archive ingest is idempotent and skips bad lines; FTS search honors channel scope,
     # blank queries and empty scopes return nothing, stats count distinct users, recent chatter
     # excludes the bot's own rows, and a live log line is searchable.

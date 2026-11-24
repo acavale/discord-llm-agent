@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import logging
 import random
 import re
@@ -70,6 +71,16 @@ def recent_phrase_bans(bot_messages: list[str], limit: int = 14) -> list[str]:
             counts[phrase] = counts.get(phrase, 0) + 1
     ranked = sorted((p for p, c in counts.items() if c >= 2), key=lambda p: (-counts[p], p))
     return ranked[:limit]
+
+
+def greeting_skeleton(text: str, drop_tokens: set[str] | None = None) -> str:
+    """A greeting's shape with the specifics stripped: normalized words minus the greeted person's
+    name tokens, first 8. Two greetings sharing a skeleton are the same greeting in a different
+    name, whatever the wording after the opening does."""
+    words = re.sub(r"[^a-z0-9 ]+", " ", (text or "").lower()).split()
+    if drop_tokens:
+        words = [w for w in words if w not in drop_tokens]
+    return " ".join(words[:8])
 
 
 def phrase_cooldown_block(bans: list[str]) -> str:
@@ -140,6 +151,12 @@ class DiscordAgent(discord.Client):
         # Phrases permanently off-limits (model-invented catchphrases it anchors on). Editable in config.
         self.banned_phrases = [str(p).lower().strip() for p in
                                (cfg.get("context", "banned_phrases", default=None) or []) if str(p).strip()]
+        # Skeletons of the greetings this bot has actually sent lately, persisted across restarts.
+        # The variety instruction in the prompt did not stop the greetings collapsing onto one
+        # opening frame, so _on_schedule enforces against this list the way _violates_ban enforces
+        # the permanent bans: regenerate once, then drop the post.
+        self._greet_skeleton_path = self.store.root / "greet_skeletons.json"
+        self._greet_skeletons: list[str] = self._load_greet_skeletons()
         _w = cfg.get("context", "message_count_weights", default=None) or [0.5, 0.35, 0.15]
         _w = [float(x) for x in _w][:3]
         while len(_w) < 3:
@@ -606,6 +623,64 @@ class DiscordAgent(discord.Client):
                 return phrase
         return None
 
+    def _load_greet_skeletons(self) -> list[str]:
+        try:
+            if not self._greet_skeleton_path.exists():
+                return []
+            raw = json.loads(self._greet_skeleton_path.read_text(encoding="utf-8"))
+            return [str(s) for s in raw if str(s).strip()][-16:]
+        except Exception as exc:
+            logger.error("greet skeleton load failed: %s", exc)
+            return []
+
+    def _save_greet_skeletons(self) -> None:
+        try:
+            tmp = self._greet_skeleton_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(self._greet_skeletons[-16:]), encoding="utf-8")
+            tmp.replace(self._greet_skeleton_path)
+        except Exception as exc:
+            logger.error("greet skeleton save failed: %s", exc)
+
+    def _greet_drop_tokens(self, match: dict) -> set[str]:
+        """Name tokens of the greeted user, plus their alias group, stripped before skeletonizing
+        so the same frame aimed at different people still collides."""
+        toks = set(re.sub(r"[^a-z0-9 ]+", " ", str(match.get("user") or "").lower()).split())
+        for group in self._identity_groups():
+            if toks & group:
+                toks |= group
+        return toks
+
+    async def _enforce_greeting_variety(self, channel, sch: dict, instruction: str, text: str,
+                                        match: dict, force_search: bool) -> str:
+        """Enforce the greeting-variety rule the prompt alone could not hold: if this presence
+        post's skeleton matches one of the last 16 greetings actually sent, regenerate once with
+        the repeated frame named; if the retry repeats a skeleton too, drop the post. Silence
+        beats a seventeenth copy of the same greeting. Returns the text to send, or "" to drop."""
+        drop = self._greet_drop_tokens(match)
+        skel = greeting_skeleton(text, drop)
+        if len(skel.split()) >= 4 and skel in self._greet_skeletons:
+            logger.info("schedule %s greeting repeated skeleton %r; regenerating once",
+                        sch.get("id"), skel)
+            retry = await self._run_for_channel(
+                channel,
+                instruction + (f"\n\nYour draft opened with a frame you have already used: "
+                               f"\"{skel}...\". Open a completely different way -- different first "
+                               f"words, different shape, no version of that opening."),
+                force_search=force_search)
+            if not retry or self._violates_ban(retry):
+                logger.info("schedule %s greeting retry unusable; skipping the post", sch.get("id"))
+                return ""
+            skel2 = greeting_skeleton(retry, drop)
+            if len(skel2.split()) >= 4 and skel2 in self._greet_skeletons:
+                logger.info("schedule %s greeting retry repeated skeleton %r; skipping the post",
+                            sch.get("id"), skel2)
+                return ""
+            text, skel = retry, skel2
+        if len(skel.split()) >= 4:
+            self._greet_skeletons.append(skel)
+            self._save_greet_skeletons()
+        return text
+
     def _echoes_human(self, cid: str, text: str) -> bool:
         """True if the reply parrots a recent human line back verbatim.
 
@@ -847,6 +922,11 @@ class DiscordAgent(discord.Client):
                 return
         if not text:
             return
+        if match:
+            text = await self._enforce_greeting_variety(channel, sch, instruction, text, match,
+                                                        force_search)
+            if not text:
+                return
         cid = str(channel.id)
         clean = await self._send_multi(channel, text)
         self.transcripts.add(cid, Entry(user="agent", content=clean, is_bot=True))
