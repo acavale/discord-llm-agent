@@ -24,6 +24,8 @@ llm:
     model: agent-model
     keep_alive: -1          # keep the model resident; per-request keep_alive is ignored by /v1
     timeout: 300            # prefill dominates on CPU-bound hosts; large prompts can take a while
+    max_tokens: 3072        # per-response generation cap; a runaway/repeating generation truncates here
+                            # instead of burning the whole timeout and dying silently
     frequency_penalty: 0.8  # anti-loop pressure for small local models
     presence_penalty: 0.5
 

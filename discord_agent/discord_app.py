@@ -178,6 +178,7 @@ class DiscordAgent(discord.Client):
                 model=cfg.get("llm", "ollama", "model", default="qwen3:30b-a3b-instruct-2507-q8_0"),
                 temperature=_temp,
                 timeout=int(cfg.get("llm", "ollama", "timeout", default=120)),
+                max_tokens=int(cfg.get("llm", "ollama", "max_tokens", default=3072)),
                 base_url=cfg.get("llm", "ollama", "base_url", default="http://localhost:11434/v1"),
                 extra_payload={
                     "keep_alive": cfg.get("llm", "ollama", "keep_alive", default=-1),

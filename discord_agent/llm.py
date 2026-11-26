@@ -75,11 +75,16 @@ def _recover_tool_calls_from_text(content: str, tool_names: frozenset = frozense
 
 class LLM:
     def __init__(self, api_key: str, model: str, temperature: float = 0.7, timeout: int = 60,
-                 base_url: str = _DEFAULT_BASE_URL, extra_payload: dict | None = None) -> None:
+                 base_url: str = _DEFAULT_BASE_URL, extra_payload: dict | None = None,
+                 max_tokens: int | None = None) -> None:
         self.api_key = api_key
         self.model = model
         self.temperature = temperature
         self.timeout = timeout
+        # Optional per-response generation cap. On the local model this is the runaway guard: an uncapped
+        # generation that falls into a repetition loop burns the whole request timeout and the reply dies
+        # silently, while a capped one finishes (truncated) or fails fast. None = field omitted entirely.
+        self.max_tokens = max_tokens
         self.url = base_url.rstrip("/") + "/chat/completions"
         # Provider-specific fields merged into every request payload (e.g. Ollama's keep_alive). Kept out
         # of the xAI path by default so we never send non-standard fields to Grok.
@@ -106,6 +111,8 @@ class LLM:
             payload["tools"] = tools
             payload["tool_choice"] = tool_choice
         payload.update(self.extra_payload)
+        if self.max_tokens:
+            payload["max_tokens"] = self.max_tokens
 
         try:
             resp = requests.post(
@@ -118,7 +125,10 @@ class LLM:
                 timeout=self.timeout,
             )
             resp.raise_for_status()
-            message = resp.json()["choices"][0]["message"]
+            choice = resp.json()["choices"][0]
+            message = choice["message"]
+            if choice.get("finish_reason") == "length":
+                logger.warning("response hit the max_tokens cap (%s); output truncated", self.max_tokens)
         except Exception as exc:  # noqa: BLE001 - surface as empty, caller decides
             logger.error("xAI request failed: %s", exc)
             return {"content": "", "tool_calls": []}

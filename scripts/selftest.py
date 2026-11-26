@@ -1112,6 +1112,29 @@ async def main() -> int:
     assert list(_res["users_with_repeated_direct_misses"].values()) == [2], _res
     print("replay_harness OK")
 
+    # llm_payload: max_tokens is sent only when configured; a length-capped reply still returns content
+    import discord_agent.llm as _llm_mod
+    _captured = {}
+    class _FakeResp:
+        def raise_for_status(self): pass
+        def json(self): return {"choices": [{"message": {"content": "hi"}, "finish_reason": "length"}]}
+    _orig_post = _llm_mod.requests.post
+    def _fake_post(url, headers=None, json=None, timeout=None):
+        _captured.clear()
+        _captured.update(json or {})
+        return _FakeResp()
+    _llm_mod.requests.post = _fake_post
+    try:
+        _plain = _llm_mod.LLM(api_key="k", model="m")
+        _out = _plain.complete([{"role": "user", "content": "x"}])
+        assert "max_tokens" not in _captured and _out["content"] == "hi", _captured
+        _capped = _llm_mod.LLM(api_key="k", model="m", max_tokens=123)
+        _capped.complete([{"role": "user", "content": "x"}])
+        assert _captured.get("max_tokens") == 123, _captured
+    finally:
+        _llm_mod.requests.post = _orig_post
+    print("llm_payload OK")
+
     print(f"config: debounce={c.debounce_secs_default if hasattr(c,'debounce_secs_default') else cfg.get('chime_in','debounce_seconds',default='?')}"
           f" name_drop_prob={c.name_drop_prob} ch1={cfg.get('channels',default={}).get('CHANNEL_ID_1',{}).get('chime_in')}")
     print("ALL SELFTESTS PASSED")
