@@ -1067,6 +1067,51 @@ async def main() -> int:
     assert _sent_url.startswith("data:image/png;base64,"), _sent_url
     print("vision_look_at_channel OK")
 
+    # replay harness: routing classification + budget mirror on a synthetic archive (no real data)
+    import importlib.util as _ilu
+    _spec = _ilu.spec_from_file_location("replay_harness", _REPO / "scripts" / "replay_harness.py")
+    _rh = _ilu.module_from_spec(_spec)
+    sys.modules["replay_harness"] = _rh  # dataclasses in the loaded module resolve via sys.modules
+    _spec.loader.exec_module(_rh)
+    _base = datetime.datetime(2026, 1, 1)
+
+    def _row(off_s, cid, uid, user, msg):
+        return {"timestamp": (_base + datetime.timedelta(seconds=off_s)).isoformat(),
+                "channel_id": cid, "user_id": uid, "username": user, "message": msg}
+
+    _rcfg = {"channels": {"1001": {"name": "zoo", "chime_in": "all"},
+                          "1002": {"name": "limited-room", "chime_in": "limited"}},
+             "chime_in": {"name_aliases": ["bot", "shitbot", "clanker"],
+                          "per_channel_hourly_budget": 6, "gate_floor": 0.5}}
+    _rows = [
+        _row(0, "1001", "u1", "alice", "hey shitbot what is up"),
+        _row(60, "1001", "999", "agent", "not much"),
+        _row(3600, "1001", "u2", "bob", "shitbot tell me a joke"),
+        _row(10800, "1001", "u1", "alice", "nice weather today"),
+        _row(14400, "1001", "u2", "bob", "anyone seen the game"),
+        _row(14500, "1001", "999", "agent", "yeah it was wild"),
+        _row(18000, "1002", "u1", "alice", "lol"),
+        _row(18600, "1002", "u2", "bob", "what do you all think of the new patch"),
+        _row(20000, "2000", "u1", "alice", "general chat one"),
+        _row(20100, "2000", "u2", "bob", "general chat two"),
+        _row(21600, "1001", "u2", "bob", "shitbot you there"),
+    ]
+    for _i in range(6):  # a directed burst that drains the hourly bucket, then one address too many
+        _rows.append(_row(7200 + 60 * _i, "1001", "u3", "carol", f"clanker ping {_i}"))
+        _rows.append(_row(7230 + 60 * _i, "1001", "999", "agent", f"pong {_i}"))
+    _rows.append(_row(7560, "1001", "u3", "carol", "clanker one more"))
+    _res = _rh.analyze(_rows, _rcfg)
+    _zoo = _res["channels"]["zoo"]
+    assert _zoo["human"] == 12 and _zoo["directed"] == 10, _zoo
+    assert _zoo["directed_answered"] == 7 and _zoo["directed_missed"] == 3, _zoo
+    assert _zoo["miss_budget_spent"] == 1 and _zoo["miss_unexplained"] == 2, _zoo
+    assert _zoo["ambient"] == 2 and _zoo["ambient_answered"] == 1, _zoo
+    _lim = _res["channels"]["limited-room"]
+    assert _lim["ambient"] == 2 and _lim["ambient_gate_rejected"] == 1, _lim
+    assert _res["readonly_human"] == 2, _res
+    assert list(_res["users_with_repeated_direct_misses"].values()) == [2], _res
+    print("replay_harness OK")
+
     print(f"config: debounce={c.debounce_secs_default if hasattr(c,'debounce_secs_default') else cfg.get('chime_in','debounce_seconds',default='?')}"
           f" name_drop_prob={c.name_drop_prob} ch1={cfg.get('channels',default={}).get('CHANNEL_ID_1',{}).get('chime_in')}")
     print("ALL SELFTESTS PASSED")
