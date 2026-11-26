@@ -1135,6 +1135,32 @@ async def main() -> int:
         _llm_mod.requests.post = _orig_post
     print("llm_payload OK")
 
+    # log_metrics: per-day counts of the failure lines the sessions watch
+    import importlib.util as _ilu
+    _spec = _ilu.spec_from_file_location("log_metrics", Path(__file__).with_name("log_metrics.py"))
+    _lm = _ilu.module_from_spec(_spec)
+    _spec.loader.exec_module(_lm)
+    def _ll(ts, msg):
+        return f"{ts} INFO discord_agent.x: {msg}"
+    _days = _lm.analyze_log([
+        _ll("2026-01-01 10:00:00,000", "xAI request failed: HTTPConnectionPool: Read timed out. (read timeout=300)"),
+        _ll("2026-01-01 11:00:00,000", "xAI request failed: HTTPConnectionPool: Read timed out. (read timeout=300)"),
+        _ll("2026-01-01 12:00:00,000", "response hit the max_tokens cap (3072); output truncated"),
+        _ll("2026-01-01 13:00:00,000", "xAI request failed: 500 Server Error"),
+        _ll("2026-01-02 09:00:00,000", "schedule activity_monitor greeting repeated skeleton 'x'; regenerating once"),
+        _ll("2026-01-02 09:05:00,000", "schedule activity_monitor greeting retry repeated skeleton 'x'; skipping the post"),
+        _ll("2026-01-02 09:06:00,000", "schedule activity_monitor greeting retry unusable; skipping the post"),
+        _ll("2026-01-02 09:10:00,000", "Logged in as agent#0001 (123)"),
+        _ll("2026-01-02 09:11:00,000", "web_search failed: No results found."),
+        "Traceback (most recent call last):",
+        "a line with no timestamp is ignored",
+    ])
+    _d1, _d2 = _days["2026-01-01"], _days["2026-01-02"]
+    assert _d1 == {"llm_timeouts": 2, "cap_hits": 1, "llm_failures_other": 1}, _d1
+    assert _d2 == {"guard_regenerations": 1, "guard_skips": 2, "logins": 1,
+                   "web_search_failures": 1, "tracebacks": 1}, _d2
+    print("log_metrics OK")
+
     print(f"config: debounce={c.debounce_secs_default if hasattr(c,'debounce_secs_default') else cfg.get('chime_in','debounce_seconds',default='?')}"
           f" name_drop_prob={c.name_drop_prob} ch1={cfg.get('channels',default={}).get('CHANNEL_ID_1',{}).get('chime_in')}")
     print("ALL SELFTESTS PASSED")
