@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from typing import Any
 
 import requests
@@ -114,6 +115,7 @@ class LLM:
         if self.max_tokens:
             payload["max_tokens"] = self.max_tokens
 
+        started = time.monotonic()
         try:
             resp = requests.post(
                 self.url,
@@ -125,12 +127,23 @@ class LLM:
                 timeout=self.timeout,
             )
             resp.raise_for_status()
-            choice = resp.json()["choices"][0]
+            data = resp.json()
+            choice = data["choices"][0]
             message = choice["message"]
             if choice.get("finish_reason") == "length":
                 logger.warning("response hit the max_tokens cap (%s); output truncated", self.max_tokens)
+            # Per-call timing and token counts, so slow calls can be attributed (prompt size vs
+            # generation length vs raw slowness) from the log instead of guessed at.
+            usage = data.get("usage") or {}
+            logger.info(
+                "llm call: model=%s wall=%.1fs prompt_tokens=%s completion_tokens=%s",
+                self.model,
+                time.monotonic() - started,
+                usage.get("prompt_tokens", "?"),
+                usage.get("completion_tokens", "?"),
+            )
         except Exception as exc:  # noqa: BLE001 - surface as empty, caller decides
-            logger.error("xAI request failed: %s", exc)
+            logger.error("xAI request failed after %.1fs: %s", time.monotonic() - started, exc)
             return {"content": "", "tool_calls": []}
 
         tool_calls = []

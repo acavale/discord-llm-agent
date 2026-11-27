@@ -1135,6 +1135,46 @@ async def main() -> int:
         _llm_mod.requests.post = _orig_post
     print("llm_payload OK")
 
+    # llm_timing: completed calls log wall time and usage token counts; failures log elapsed time
+    import logging as _logging
+    _records = []
+    class _Cap(_logging.Handler):
+        def emit(self, record):
+            _records.append(record.getMessage())
+    _llm_logger = _logging.getLogger("discord_agent.llm")
+    _cap = _Cap()
+    _old_level = _llm_logger.level
+    _llm_logger.addHandler(_cap)
+    _llm_logger.setLevel(_logging.INFO)
+    class _FakeResp2:
+        def raise_for_status(self): pass
+        def json(self): return {"choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}],
+                                "usage": {"prompt_tokens": 2400, "completion_tokens": 87}}
+    class _FakeResp3:
+        def raise_for_status(self): pass
+        def json(self): return {"choices": [{"message": {"content": "hi"}, "finish_reason": "stop"}]}
+    try:
+        _llm_mod.requests.post = lambda url, headers=None, json=None, timeout=None: _FakeResp2()
+        _records.clear()
+        _llm_mod.LLM(api_key="<redacted>", model="m").complete([{"role": "user", "content": "x"}])
+        assert any("llm call:" in r and "prompt_tokens=2400" in r and "completion_tokens=87" in r
+                   and "wall=" in r for r in _records), _records
+        _llm_mod.requests.post = lambda url, headers=None, json=None, timeout=None: _FakeResp3()
+        _records.clear()
+        _llm_mod.LLM(api_key="<redacted>", model="m").complete([{"role": "user", "content": "x"}])
+        assert any("prompt_tokens=?" in r for r in _records), _records
+        def _boom(url, headers=None, json=None, timeout=None):
+            raise _llm_mod.requests.ReadTimeout("Read timed out.")
+        _llm_mod.requests.post = _boom
+        _records.clear()
+        _out = _llm_mod.LLM(api_key="<redacted>", model="m").complete([{"role": "user", "content": "x"}])
+        assert _out["content"] == "" and any("xAI request failed after" in r for r in _records), _records
+    finally:
+        _llm_mod.requests.post = _orig_post
+        _llm_logger.removeHandler(_cap)
+        _llm_logger.setLevel(_old_level)
+    print("llm_timing OK")
+
     # log_metrics: per-day counts of the failure lines the sessions watch
     import importlib.util as _ilu
     _spec = _ilu.spec_from_file_location("log_metrics", Path(__file__).with_name("log_metrics.py"))
@@ -1153,12 +1193,16 @@ async def main() -> int:
         _ll("2026-01-02 09:10:00,000", "Logged in as agent#0001 (123)"),
         _ll("2026-01-02 09:11:00,000", "web_search failed: No results found."),
         "Traceback (most recent call last):",
+        _ll("2026-01-03 10:00:00,000", "llm call: model=m wall=10.0s prompt_tokens=1000 completion_tokens=50"),
+        _ll("2026-01-03 11:00:00,000", "llm call: model=m wall=20.0s prompt_tokens=3000 completion_tokens=70"),
         "a line with no timestamp is ignored",
     ])
     _d1, _d2 = _days["2026-01-01"], _days["2026-01-02"]
     assert _d1 == {"llm_timeouts": 2, "cap_hits": 1, "llm_failures_other": 1}, _d1
     assert _d2 == {"guard_regenerations": 1, "guard_skips": 2, "logins": 1,
                    "web_search_failures": 1, "tracebacks": 1}, _d2
+    _d3 = _days["2026-01-03"]
+    assert _d3 == {"llm_calls": 2, "llm_wall_avg_s": 15.0, "llm_prompt_tokens_avg": 2000}, _d3
     print("log_metrics OK")
 
     print(f"config: debounce={c.debounce_secs_default if hasattr(c,'debounce_secs_default') else cfg.get('chime_in','debounce_seconds',default='?')}"
