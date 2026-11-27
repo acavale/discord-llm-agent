@@ -146,14 +146,31 @@ def build_system_prompt(
     return base + _STABILITY_GUARD
 
 
-def build_user_messages(entries: list[Entry]) -> list[dict]:
-    """Render the channel transcript as a single user turn the model reads as the live conversation."""
+def build_user_messages(entries: list[Entry], max_chars: int = 2800, entry_cap: int = 400) -> list[dict]:
+    """Render the channel transcript as a single user turn the model reads as the live conversation.
+
+    Character-bounded on purpose: the local model re-reads this transcript on every call and prompt
+    prefill is the bot's latency floor (measured ~17 tokens/s uncached on the tower), so an unbounded
+    30-message transcript made every call re-read thousands of tokens. Older entries drop first and
+    long entries are cut to entry_cap; the newest entry (the message being answered) is kept whole.
+    """
     lines = []
-    for e in entries:
+    last = len(entries) - 1
+    for i, e in enumerate(entries):
         speaker = "you (the agent)" if e.is_bot else e.user
         text = e.content
         if e.image_descs:
             text += " " + " ".join(f"[image: {d}]" for d in e.image_descs)
+        if i != last and len(text) > entry_cap:
+            text = text[:entry_cap]
         lines.append(f"{speaker}: {text}")
-    convo = "\n".join(lines)
+    kept: list[str] = []
+    total = 0
+    for line in reversed(lines):
+        if kept and total + len(line) + 1 > max_chars:
+            break
+        kept.append(line)
+        total += len(line) + 1
+    kept.reverse()
+    convo = "\n".join(kept)
     return [{"role": "user", "content": f"Recent conversation in this channel:\n{convo}"}]

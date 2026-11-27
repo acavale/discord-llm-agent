@@ -1175,6 +1175,25 @@ async def main() -> int:
         _llm_logger.setLevel(_old_level)
     print("llm_timing OK")
 
+    # transcript_budget: rendered history is character-bounded; oldest drop first, newest kept whole
+    from discord_agent.context import Entry as _E2
+    from discord_agent.context import build_user_messages as _bum
+    _short = [_E2(user="amy", content="hi there"), _E2(user="agent", content="hey", is_bot=True)]
+    _out = _bum(_short)[0]["content"]
+    assert "amy: hi there" in _out and "you (the agent): hey" in _out, _out
+    _many = [_E2(user=f"u{i}", content="x" * 100) for i in range(30)]
+    _out = _bum(_many)[0]["content"]
+    _body = _out.split(":\n", 1)[1]
+    assert len(_body) <= 2800 + 110, len(_body)  # budget plus the always-kept newest line
+    assert "u29" in _out and "u0:" not in _out, _out  # newest kept, oldest dropped
+    _long_old = [_E2(user="amy", content="y" * 900), _E2(user="bob", content="ok")]
+    _out = _bum(_long_old)[0]["content"]
+    assert "y" * 401 not in _out and "bob: ok" in _out, _out  # old long entry cut to the cap
+    _huge_new = [_E2(user="amy", content="short"), _E2(user="bob", content="z" * 5000)]
+    _out = _bum(_huge_new)[0]["content"]
+    assert "z" * 5000 in _out, "newest entry is always kept whole"
+    print("transcript_budget OK")
+
     # log_metrics: per-day counts of the failure lines the sessions watch
     import importlib.util as _ilu
     _spec = _ilu.spec_from_file_location("log_metrics", Path(__file__).with_name("log_metrics.py"))
