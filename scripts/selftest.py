@@ -1194,6 +1194,21 @@ async def main() -> int:
     assert "z" * 5000 in _out, "newest entry is always kept whole"
     print("transcript_budget OK")
 
+    # prompt_parts: build_system_prompt reports the char size of each variable part
+    from discord_agent.context import build_system_prompt as _bsp
+    _parts: dict = {}
+    _res = _bsp("P {memory} Q {quirks} on {date} at {time}", "MEM", "QUIRK", "chan", "DIG",
+                chatter=[("amy", "hello")], parts_out=_parts)
+    assert _parts["total_chars"] == len(_res), _parts
+    assert _parts["memory_chars"] == len("MEM\n\nDIG"), _parts
+    assert _parts["quirks_chars"] == len("QUIRK"), _parts
+    assert _parts["chatter_chars"] > len("amy: hello"), _parts
+    assert _parts["persona_chars"] > 0, _parts
+    _parts2: dict = {}
+    _bsp("P {memory} Q {quirks} on {date} at {time}", "MEM", "QUIRK", "chan", "", parts_out=_parts2)
+    assert _parts2["chatter_chars"] == 0 and _parts2["memory_chars"] == len("MEM"), _parts2
+    print("prompt_parts OK")
+
     # log_metrics: per-day counts of the failure lines the sessions watch
     import importlib.util as _ilu
     _spec = _ilu.spec_from_file_location("log_metrics", Path(__file__).with_name("log_metrics.py"))
@@ -1214,6 +1229,8 @@ async def main() -> int:
         "Traceback (most recent call last):",
         _ll("2026-01-03 10:00:00,000", "llm call: model=m wall=10.0s prompt_tokens=1000 completion_tokens=50"),
         _ll("2026-01-03 11:00:00,000", "llm call: model=m wall=20.0s prompt_tokens=3000 completion_tokens=70"),
+        _ll("2026-01-03 12:00:00,000", "prompt parts: total_chars=4000 persona_chars=2000 memory_chars=1000 quirks_chars=500 chatter_chars=500"),
+        _ll("2026-01-03 13:00:00,000", "prompt parts: total_chars=6000 persona_chars=2000 memory_chars=2000 quirks_chars=500 chatter_chars=700"),
         "a line with no timestamp is ignored",
     ])
     _d1, _d2 = _days["2026-01-01"], _days["2026-01-02"]
@@ -1221,7 +1238,9 @@ async def main() -> int:
     assert _d2 == {"guard_regenerations": 1, "guard_skips": 2, "logins": 1,
                    "web_search_failures": 1, "tracebacks": 1}, _d2
     _d3 = _days["2026-01-03"]
-    assert _d3 == {"llm_calls": 2, "llm_wall_avg_s": 15.0, "llm_prompt_tokens_avg": 2000}, _d3
+    assert _d3 == {"llm_calls": 2, "llm_wall_avg_s": 15.0, "llm_prompt_tokens_avg": 2000,
+                   "prompt_parts": 2, "sys_chars_avg": 5000, "memory_chars_avg": 1500,
+                   "chatter_chars_avg": 600}, _d3
     print("log_metrics OK")
 
     print(f"config: debounce={c.debounce_secs_default if hasattr(c,'debounce_secs_default') else cfg.get('chime_in','debounce_seconds',default='?')}"

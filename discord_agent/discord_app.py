@@ -837,6 +837,7 @@ class DiscordAgent(discord.Client):
         chatter = (self.msgstore.recent_chatter(set(self.channels_cfg), self.style_samples,
                                                 include_channel_ids=public)
                    if self.style_samples and public else None)
+        parts: dict[str, int] = {}
         system = build_system_prompt(
             self.persona_template,
             self.member_memory.format_identity(present),
@@ -844,6 +845,12 @@ class DiscordAgent(discord.Client):
             name,
             digest,
             chatter=chatter,
+            parts_out=parts,
+        )
+        logger.info(
+            "prompt parts: total_chars=%d persona_chars=%d memory_chars=%d quirks_chars=%d chatter_chars=%d",
+            parts.get("total_chars", 0), parts.get("persona_chars", 0), parts.get("memory_chars", 0),
+            parts.get("quirks_chars", 0), parts.get("chatter_chars", 0),
         )
         bans = list(self.banned_phrases) + [p for p in self._recent_phrase_bans(cid)
                                             if p not in self.banned_phrases]

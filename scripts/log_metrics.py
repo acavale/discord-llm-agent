@@ -9,6 +9,7 @@ The failure modes that matter for clanker-channel quality are all single log lin
   - greeting-guard firings (regenerations and skipped posts)
   - logins (restarts) and tracebacks
   - per-call LLM timing lines, folded into per-day call counts and average wall time / prompt size
+  - prompt-part size lines, folded into per-day average system-prompt chars (total, member memory, background chatter)
 
 This tool counts them per day so a session can report deltas instead of re-grepping the log by hand.
 It reads only the file it is pointed at, prints counts only (never log content), and writes nothing.
@@ -25,6 +26,7 @@ from pathlib import Path
 
 _LINE = re.compile(r"^(\d{4}-\d{2}-\d{2}) \d{2}:\d{2}:\d{2},\d{3} ")
 _LLM_CALL = re.compile(r"llm call: model=\S+ wall=([\d.]+)s prompt_tokens=(\d+|\?) completion_tokens=(\d+|\?)")
+_PARTS = re.compile(r"prompt parts: total_chars=(\d+) persona_chars=(\d+) memory_chars=(\d+) quirks_chars=(\d+) chatter_chars=(\d+)")
 
 # metric -> substrings that must ALL appear in the line
 _PATTERNS: list[tuple[str, tuple[str, ...]]] = [
@@ -44,6 +46,7 @@ def analyze_log(lines: list[str]) -> OrderedDict[str, dict[str, float]]:
     timing lines fold into llm_calls plus average wall seconds and prompt tokens for the day."""
     days: OrderedDict[str, dict[str, float]] = OrderedDict()
     timing: dict[str, list[float]] = {}  # day -> [calls, wall_sum, prompt_sum, prompt_n]
+    parts: dict[str, list[float]] = {}  # day -> [n, total_sum, memory_sum, chatter_sum]
     last_day: str | None = None
     for line in lines:
         m = _LINE.match(line)
@@ -55,6 +58,14 @@ def analyze_log(lines: list[str]) -> OrderedDict[str, dict[str, float]]:
             continue
         last_day = m.group(1)
         day = days.setdefault(last_day, {})
+        part = _PARTS.search(line)
+        if part:
+            acc = parts.setdefault(last_day, [0, 0.0, 0.0, 0.0])
+            acc[0] += 1
+            acc[1] += int(part.group(1))
+            acc[2] += int(part.group(3))
+            acc[3] += int(part.group(5))
+            continue
         call = _LLM_CALL.search(line)
         if call:
             acc = timing.setdefault(last_day, [0, 0.0, 0.0, 0])
@@ -79,6 +90,12 @@ def analyze_log(lines: list[str]) -> OrderedDict[str, dict[str, float]]:
         day["llm_wall_avg_s"] = round(wall_sum / calls, 1)
         if prompt_n:
             day["llm_prompt_tokens_avg"] = round(prompt_sum / prompt_n)
+    for day_name, (n, total_sum, memory_sum, chatter_sum) in parts.items():
+        day = days[day_name]
+        day["prompt_parts"] = int(n)
+        day["sys_chars_avg"] = round(total_sum / n)
+        day["memory_chars_avg"] = round(memory_sum / n)
+        day["chatter_chars_avg"] = round(chatter_sum / n)
     return days
 
 
@@ -94,7 +111,8 @@ def main(argv: list[str]) -> int:
     days = analyze_log(lines)
     metrics = ["llm_timeouts", "cap_hits", "llm_failures_other", "web_search_failures",
                "guard_regenerations", "guard_skips", "logins", "tracebacks",
-               "llm_calls", "llm_wall_avg_s", "llm_prompt_tokens_avg"]
+               "llm_calls", "llm_wall_avg_s", "llm_prompt_tokens_avg",
+               "prompt_parts", "sys_chars_avg", "memory_chars_avg", "chatter_chars_avg"]
     print(f"{'day':<12}" + "".join(f"{m:>22}" for m in metrics))
     for day in list(days)[-days_n:]:
         counts = days[day]
